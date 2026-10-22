@@ -54,5 +54,5 @@ jobs:
           match=$(grep -E -f <(printf '%s\n' "$patterns") <<<"$files" | head -1 || true)
           if [ -z "$match" ]; then echo "#$number changes no path of $POLICY_PATH: no review app required"; exit 0; fi
           echo "#$number changes '$match' (matches $POLICY_PATH at $base): deploying the review app of ${HEAD_SHA:0:7}"
-          gh workflow run "$DEPLOY_WORKFLOW" --ref "$HEAD_BRANCH" -f "pr=$number"
+          gh workflow run "$DEPLOY_WORKFLOW" --repo "$GITHUB_REPOSITORY" --ref "$HEAD_BRANCH" -f "pr=$number"
           echo "dispatched $DEPLOY_WORKFLOW for #$number (${HEAD_SHA:0:7})" >> "$GITHUB_STEP_SUMMARY"
