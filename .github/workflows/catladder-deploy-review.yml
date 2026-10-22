@@ -1,0 +1,19 @@
+name: ▶️ catladder deploy review
+on:
+  workflow_dispatch:
+    inputs:
+      pr: { description: PR number, required: true, type: string }
+      source: { description: manual or ci, required: false, type: string, default: manual }
+permissions:
+  statuses: write
+  pull-requests: read
+jobs:
+  deploy:
+    name: fake deploy
+    runs-on: ubuntu-latest
+    env: { GH_TOKEN: "${{ github.token }}" }
+    steps:
+      - run: |-
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/${{ inputs.pr }}" --jq .head.sha)
+          echo "deploying review app for #${{ inputs.pr }} ($sha, source=${{ inputs.source }}, ref=$GITHUB_REF_NAME)"
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" -f state=success -f context="catladder review app" -f description="fake deploy ok" > /dev/null

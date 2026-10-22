@@ -1,0 +1,10 @@
+name: 🛠️ catladder review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  catladder-ok:
+    name: catladder ✅
+    runs-on: ubuntu-latest
+    steps:
+      - run: sleep 20 && echo green

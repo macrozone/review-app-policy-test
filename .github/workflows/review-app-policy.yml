@@ -1,0 +1,58 @@
+# Required review apps (ADR 7 Amendment 7): when the CI run of a pull request
+# head finishes green and the PR changes a path listed in
+# .github/review-app-required-paths (read from the base branch, so a PR cannot
+# drop its own trigger), start the review deploy for that head. No label is
+# needed; the merge train only reads the commit status the deploy sets.
+#
+# `workflow_run` always runs this file's version on the default branch and
+# only after the CI run has completed, so the deploy guard's "CI not finished"
+# check cannot lose a race. Everything repo-specific is in `env`; the rest is
+# a template for other repositories.
+name: 🧭 review app policy
+on:
+  workflow_run:
+    workflows:
+      - 🛠️ catladder review
+    types:
+      - completed
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+env:
+  POLICY_PATH: .github/review-app-required-paths
+  DEPLOY_WORKFLOW: catladder-deploy-review.yml
+jobs:
+  policy:
+    name: 🧭 review app policy
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+    steps:
+      - name: decide and dispatch
+        run: |-
+          set -euo pipefail
+          if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "fork PR ($HEAD_REPO): review apps are not deployed for forks"; exit 0
+          fi
+          # The PR of this head: the one whose current head is the run's SHA (a superseded push gets its own run).
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
+            --jq '[.[] | select(.state == "open" and .head.sha == env.HEAD_SHA)] | first // empty')
+          if [ -z "$pr" ]; then echo "no open PR has ${HEAD_SHA:0:7} as its head: nothing to deploy"; exit 0; fi
+          number=$(jq -r .number <<<"$pr"); base=$(jq -r .base.ref <<<"$pr")
+          if [ "$(jq -r .draft <<<"$pr")" = "true" ]; then echo "#$number is a draft: drafts don't deploy review apps"; exit 0; fi
+          # Policy from the base branch, not from the PR head. Unreadable policy fails the job (fail closed).
+          patterns=$(gh api "repos/$GITHUB_REPOSITORY/contents/$POLICY_PATH?ref=$base" --jq .content | base64 -d \
+            | grep -Ev '^[[:space:]]*(#|$)' || true)
+          if [ -z "$patterns" ]; then echo "no patterns in $POLICY_PATH at $base: no review app required"; exit 0; fi
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$number/files?per_page=100" \
+            --jq '.[] | .filename, (.previous_filename // empty)')
+          match=$(grep -E -f <(printf '%s\n' "$patterns") <<<"$files" | head -1 || true)
+          if [ -z "$match" ]; then echo "#$number changes no path of $POLICY_PATH: no review app required"; exit 0; fi
+          echo "#$number changes '$match' (matches $POLICY_PATH at $base): deploying the review app of ${HEAD_SHA:0:7}"
+          gh workflow run "$DEPLOY_WORKFLOW" --ref "$HEAD_BRANCH" -f "pr=$number"
+          echo "dispatched $DEPLOY_WORKFLOW for #$number (${HEAD_SHA:0:7})" >> "$GITHUB_STEP_SUMMARY"
